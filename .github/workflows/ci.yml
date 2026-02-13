@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate no hardcoded secrets
+        run: |
+          chmod +x scripts/check-no-secrets.sh
+          scripts/check-no-secrets.sh
+
+      - name: Run pre-commit checks
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pre-commit clang-format
+          pre-commit run --all-files
+
+      - name: Validate Compose config
+        run: docker compose config
+
+      - name: Build and start stack
+        run: docker compose up -d --build
+
+      - name: Initialize app metrics selection
+        run: |
+          docker compose exec -T app sh -lc "printf 'cpu_usage_percentage,memory_usage_percentage,disk_usage_percentage' > /tmp/monitor_fifo"
+
+      - name: Run smoke tests
+        run: |
+          chmod +x scripts/ci-smoke.sh
+          scripts/ci-smoke.sh
+
+      - name: Show status
+        if: always()
+        run: docker compose ps
+
+      - name: Collect container logs
+        if: failure()
+        run: |
+          mkdir -p ci-logs
+          docker compose logs --no-color app > ci-logs/app.log || true
+          docker compose logs --no-color prometheus > ci-logs/prometheus.log || true
+          docker compose logs --no-color blackbox > ci-logs/blackbox.log || true
+          docker compose logs --no-color alertmanager > ci-logs/alertmanager.log || true
+          docker compose logs --no-color grafana > ci-logs/grafana.log || true
+
+      - name: Upload logs artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: ci-logs/
+
+      - name: Teardown
+        if: always()
+        run: docker compose down -v
