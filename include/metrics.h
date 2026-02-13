@@ -33,7 +33,6 @@
 #define PROC_NET_DEV_PATH "/proc/net/dev" /**< Path to the network device file. */
 #define NETWORK_INTERFACE "wlp4s0"        /**< Network interface to monitor. */
 #define PROC_MEMINFO_PATH "/proc/meminfo" /**< Path to the meminfo file. */
-#define PROC_STAT_PATH "/proc/stat"       /**< Path to the stat file. */
 #define ROOT_PATH "/"                     /**< Root path for the file system. */
 #define HWMON_CPU_TEMP_PATH "/sys/class/hwmon/hwmon4/temp1_input"             /**< Path to the CPU temperature file. */
 #define HWMON_BATTERY_VOLTAGE_PATH "/sys/class/hwmon/hwmon2/in0_input"        /**< Path to the battery voltage file. */
@@ -186,9 +185,9 @@ double get_available_memory();
  *
  * Reads the number of context switches from /proc/stat.
  *
- * @return The number of context switches, or -1 in case of error.
+ * @return The number of context switches, or 0 on parse failure.
  */
-int get_context_switches();
+unsigned long long get_context_switches();
 
 /**
  * @brief Structure to hold disk statistics.

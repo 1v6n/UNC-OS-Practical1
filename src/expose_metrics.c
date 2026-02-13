@@ -274,7 +274,7 @@ void update_disk_stats_metrics(void)
     }
 }
 
-void* expose_metrics(const void* arg)
+void* expose_metrics(void* arg)
 {
     (void)arg;
 

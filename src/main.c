@@ -9,7 +9,7 @@
 #include "expose_metrics.h"
 #include "metrics.h"
 #define FIFO_PATH "/tmp/monitor_fifo"
-#define BUFFER_SIZE 256
+#define MAIN_BUFFER_SIZE 256
 #define MAX_METRICS 10
 #define STATUS_FILE "/tmp/monitor_status"
 
@@ -123,7 +123,7 @@ void start_prometheus()
  * expose_metrics function. If the thread creation fails, an error message
  * is printed to stderr.
  */
-void create_threads(void)
+int create_threads(void)
 {
     pthread_t tid;
     if (pthread_create(&tid, NULL, expose_metrics, NULL) != 0)
@@ -132,13 +132,17 @@ void create_threads(void)
         update_status("Error creating HTTP server thread");
         return EXIT_FAILURE;
     }
+    return EXIT_SUCCESS;
 }
 
 void start_metrics_monitoring(const char* selected_metrics[], size_t num_metrics)
 {
     init_metrics(selected_metrics, num_metrics);
 
-    create_threads();
+    if (create_threads() != EXIT_SUCCESS)
+    {
+        return;
+    }
 
     void (*update_functions[num_metrics])(void);
 
@@ -160,7 +164,7 @@ void start_metrics_monitoring(const char* selected_metrics[], size_t num_metrics
         }
         if (update_functions[i] == NULL)
         {
-            char status_message[BUFFER_SIZE];
+            char status_message[MAIN_BUFFER_SIZE];
             snprintf(status_message, sizeof(status_message), "Error: No update function found for metric '%s'",
                      metric_name);
             update_status(status_message);
@@ -237,7 +241,7 @@ void start_monitoring_from_fifo()
         exit(EXIT_FAILURE);
     }
 
-    char buffer[BUFFER_SIZE];
+    char buffer[MAIN_BUFFER_SIZE];
     size_t bytesRead = fread(buffer, sizeof(char), sizeof(buffer) - 1, fifo_file);
     if (bytesRead > 0)
     {

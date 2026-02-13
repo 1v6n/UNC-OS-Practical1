@@ -62,7 +62,7 @@ void update_memory_gauge(void);
  * @param arg Unused argument.
  * @return NULL
  */
-void* expose_metrics(const void* arg);
+void* expose_metrics(void* arg);
 
 /**
  * @brief Initializes mutex and metrics.

@@ -8,6 +8,55 @@
 
 #include "metrics.h"
 
+static const char* get_monitored_interface(void)
+{
+    const char* env_iface = getenv("NETWORK_INTERFACE");
+    if (env_iface != NULL && env_iface[0] != '\0')
+    {
+        return env_iface;
+    }
+
+    static char detected_iface[64] = {0};
+    if (detected_iface[0] != '\0')
+    {
+        return detected_iface;
+    }
+
+    FILE* fp = fopen(PROC_NET_DEV_PATH, "r");
+    if (fp == NULL)
+    {
+        return NETWORK_INTERFACE;
+    }
+
+    char line[BUFFER_SIZE];
+    fgets(line, sizeof(line), fp);
+    fgets(line, sizeof(line), fp);
+
+    while (fgets(line, sizeof(line), fp) != NULL)
+    {
+        char iface[64] = {0};
+        if (sscanf(line, " %63[^:]:", iface) != 1)
+        {
+            continue;
+        }
+
+        if (strcmp(iface, "lo") != 0)
+        {
+            strncpy(detected_iface, iface, sizeof(detected_iface) - 1);
+            break;
+        }
+    }
+
+    fclose(fp);
+
+    if (detected_iface[0] == '\0')
+    {
+        return NETWORK_INTERFACE;
+    }
+
+    return detected_iface;
+}
+
 static double read_value(const char* path)
 {
     FILE* fp = fopen(path, "r");
@@ -17,8 +66,8 @@ static double read_value(const char* path)
         return RETURN_ERROR;
     }
 
-    int value;
-    if (fscanf(fp, "%d", &value) != 1)
+    long long value;
+    if (fscanf(fp, "%lld", &value) != 1)
     {
         fprintf(stderr, "Error reading value from %s\n", path);
         fclose(fp);
@@ -39,15 +88,15 @@ double get_memory_usage()
     }
 
     char buffer[BUFFER_SIZE];
-    double total_mem = 0, free_mem = 0;
+    unsigned long long total_mem_kb = 0, available_mem_kb = 0;
 
     while (fgets(buffer, sizeof(buffer), fp) != NULL)
     {
-        if (sscanf(buffer, "MemTotal: %llu kB", &total_mem) == 1)
+        if (sscanf(buffer, "MemTotal: %llu kB", &total_mem_kb) == 1)
         {
             continue;
         }
-        if (sscanf(buffer, "MemAvailable: %llu kB", &free_mem) == 1)
+        if (sscanf(buffer, "MemAvailable: %llu kB", &available_mem_kb) == 1)
         {
             break;
         }
@@ -55,23 +104,23 @@ double get_memory_usage()
 
     fclose(fp);
 
-    if (total_mem == 0 || free_mem == 0)
+    if (total_mem_kb == 0 || available_mem_kb == 0 || available_mem_kb > total_mem_kb)
     {
         fprintf(stderr, "Error reading memory information from " PROC_MEMINFO_PATH "\n");
         return RETURN_ERROR;
     }
 
-    double used_mem = (total_mem - free_mem);
-    double mem_usage_percent = (used_mem / total_mem) * 100.0;
+    double used_mem_kb = (double)(total_mem_kb - available_mem_kb);
+    double mem_usage_percent = (used_mem_kb / (double)total_mem_kb) * 100.0;
 
     return mem_usage_percent;
 }
 
 double get_cpu_usage()
 {
-    static double prev_user = 0, prev_nice = 0, prev_system = 0, prev_idle = 0, prev_iowait = 0, prev_irq = 0,
-                  prev_softirq = 0, prev_steal = 0;
-    double user, nice, system, idle, iowait, irq, softirq, steal;
+    static unsigned long long prev_user = 0, prev_nice = 0, prev_system = 0, prev_idle = 0, prev_iowait = 0,
+                              prev_irq = 0, prev_softirq = 0, prev_steal = 0;
+    unsigned long long user, nice, system, idle, iowait, irq, softirq, steal;
 
     FILE* fp = fopen(PROC_STAT_PATH, "r");
     if (fp == NULL)
@@ -97,14 +146,14 @@ double get_cpu_usage()
         return RETURN_ERROR;
     }
 
-    double prev_idle_total = prev_idle + prev_iowait;
-    double idle_total = idle + iowait;
-    double prev_non_idle = prev_user + prev_nice + prev_system + prev_irq + prev_softirq + prev_steal;
-    double non_idle = user + nice + system + irq + softirq + steal;
-    double prev_total = prev_idle_total + prev_non_idle;
-    double total = idle_total + non_idle;
-    double totald = total - prev_total;
-    double idled = idle_total - prev_idle_total;
+    unsigned long long prev_idle_total = prev_idle + prev_iowait;
+    unsigned long long idle_total = idle + iowait;
+    unsigned long long prev_non_idle = prev_user + prev_nice + prev_system + prev_irq + prev_softirq + prev_steal;
+    unsigned long long non_idle = user + nice + system + irq + softirq + steal;
+    unsigned long long prev_total = prev_idle_total + prev_non_idle;
+    unsigned long long total = idle_total + non_idle;
+    unsigned long long totald = total - prev_total;
+    unsigned long long idled = idle_total - prev_idle_total;
 
     if (totald == 0)
     {
@@ -112,7 +161,7 @@ double get_cpu_usage()
         return RETURN_ERROR;
     }
 
-    double cpu_usage_percent = ((totald - idled) / totald) * 100.0;
+    double cpu_usage_percent = ((double)(totald - idled) / (double)totald) * 100.0;
 
     prev_user = user;
     prev_nice = nice;
@@ -136,9 +185,15 @@ double get_disk_usage()
         return RETURN_ERROR;
     }
 
-    unsigned long total = stat.f_blocks * stat.f_frsize;
-    unsigned long available = stat.f_bavail * stat.f_frsize;
-    unsigned long used = total - available;
+    unsigned long long total = (unsigned long long)stat.f_blocks * stat.f_frsize;
+    unsigned long long available = (unsigned long long)stat.f_bavail * stat.f_frsize;
+    unsigned long long used = total - available;
+
+    if (total == 0)
+    {
+        fprintf(stderr, "Invalid total disk size\n");
+        return RETURN_ERROR;
+    }
 
     double usage_percentage = ((double)used / (double)total) * PERCENTAGE;
     return usage_percentage;
@@ -237,18 +292,18 @@ double get_total_memory()
     }
 
     char buffer[BUFFER_SIZE];
-    double total_mem = 0;
+    unsigned long long total_mem_kb = 0;
 
     while (fgets(buffer, sizeof(buffer), fp) != NULL)
     {
-        if (sscanf(buffer, "MemTotal: %llu kB", &total_mem) == 1)
+        if (sscanf(buffer, "MemTotal: %llu kB", &total_mem_kb) == 1)
         {
             break;
         }
     }
 
     fclose(fp);
-    return total_mem / CONVERT_TO_MB;
+    return ((double)total_mem_kb) / CONVERT_TO_MB;
 }
 
 double get_used_memory()
@@ -261,18 +316,30 @@ double get_used_memory()
     }
 
     char buffer[BUFFER_SIZE];
-    double total_mem = 0, free_mem = 0, buffers = 0, cached = 0;
+    unsigned long long total_mem_kb = 0, free_mem_kb = 0, buffers_kb = 0, cached_kb = 0;
 
     while (fgets(buffer, sizeof(buffer), fp) != NULL)
     {
-        sscanf(buffer, "MemTotal: %llu kB", &total_mem);
-        sscanf(buffer, "MemFree: %llu kB", &free_mem);
-        sscanf(buffer, "Buffers: %llu kB", &buffers);
-        sscanf(buffer, "Cached: %llu kB", &cached);
+        sscanf(buffer, "MemTotal: %llu kB", &total_mem_kb);
+        sscanf(buffer, "MemFree: %llu kB", &free_mem_kb);
+        sscanf(buffer, "Buffers: %llu kB", &buffers_kb);
+        sscanf(buffer, "Cached: %llu kB", &cached_kb);
     }
 
     fclose(fp);
-    return (total_mem - free_mem - buffers - cached) / CONVERT_TO_MB;
+    if (total_mem_kb == 0)
+    {
+        fprintf(stderr, "Error reading memory information from " PROC_MEMINFO_PATH "\n");
+        return RETURN_ERROR;
+    }
+
+    unsigned long long reclaimable_kb = free_mem_kb + buffers_kb + cached_kb;
+    if (reclaimable_kb > total_mem_kb)
+    {
+        reclaimable_kb = total_mem_kb;
+    }
+
+    return ((double)(total_mem_kb - reclaimable_kb)) / CONVERT_TO_MB;
 }
 
 double get_available_memory()
@@ -285,18 +352,18 @@ double get_available_memory()
     }
 
     char buffer[BUFFER_SIZE];
-    double available_mem = 0;
+    unsigned long long available_mem_kb = 0;
 
     while (fgets(buffer, sizeof(buffer), fp) != NULL)
     {
-        if (sscanf(buffer, "MemAvailable: %llu kB", &available_mem) == 1)
+        if (sscanf(buffer, "MemAvailable: %llu kB", &available_mem_kb) == 1)
         {
             break;
         }
     }
 
     fclose(fp);
-    return available_mem / CONVERT_TO_MB;
+    return ((double)available_mem_kb) / CONVERT_TO_MB;
 }
 
 NetworkStats get_network_traffic()
@@ -311,32 +378,31 @@ NetworkStats get_network_traffic()
     char buffer[BUFFER_SIZE];
     unsigned long long rx_bytes = 0, tx_bytes = 0;
     unsigned long long rx_errors = 0, tx_errors = 0, dropped_packets = 0;
+    const char* monitored_iface = get_monitored_interface();
 
     fgets(buffer, sizeof(buffer), fp);
     fgets(buffer, sizeof(buffer), fp);
 
     while (fgets(buffer, sizeof(buffer), fp) != NULL)
     {
-        if (strstr(buffer, NETWORK_INTERFACE) != NULL)
+        char iface[64] = {0};
+        unsigned long long r_bytes, t_bytes, r_errors, t_errors, drop;
+
+        int matched = sscanf(buffer, " %63[^:]: %llu %*d %llu %llu %*d %*d %*d %*d %llu %*d %llu", iface, &r_bytes,
+                             &r_errors, &drop, &t_bytes, &t_errors);
+
+        if (matched != 6)
         {
-            unsigned long long r_bytes, t_bytes, r_errors, t_errors, drop;
+            continue;
+        }
 
-            int matched = sscanf(buffer, "%*[^:]: %llu %*d %llu %llu %*d %*d %*d %*d %llu %*d %llu", &r_bytes,
-                                 &r_errors, &drop, &t_bytes, &t_errors);
-
-            if (matched != 5)
-            {
-                fprintf(stderr, "sscanf failed to match expected format (matched = %d) for line: %s\n", matched,
-                        buffer);
-                continue;
-            }
-
+        if (strcmp(iface, monitored_iface) == 0)
+        {
             rx_bytes = r_bytes;
             tx_bytes = t_bytes;
             rx_errors = r_errors;
             tx_errors = t_errors;
             dropped_packets = drop;
-
             break;
         }
     }
@@ -345,21 +411,21 @@ NetworkStats get_network_traffic()
     return (NetworkStats){rx_bytes, tx_bytes, rx_errors, tx_errors, dropped_packets};
 }
 
-int get_context_switches()
+unsigned long long get_context_switches()
 {
     FILE* fp = fopen(PROC_STAT_PATH, "r");
     if (fp == NULL)
     {
         perror("Error opening /proc/stat");
-        return RETURN_ERROR;
+        return 0;
     }
 
     char buffer[BUFFER_SIZE];
-    int context_switches = 0;
+    unsigned long long context_switches = 0;
 
     while (fgets(buffer, sizeof(buffer), fp) != NULL)
     {
-        if (sscanf(buffer, "ctxt %d", &context_switches) == 1)
+        if (sscanf(buffer, "ctxt %llu", &context_switches) == 1)
         {
             break;
         }
@@ -383,8 +449,8 @@ DiskStats get_disk_stats()
 
     while (fgets(buffer, sizeof(buffer), fp) != NULL)
     {
-        long long it, wc, rc;
-        if (sscanf(buffer, "%*d %*d %*s %lld %*d %*d %*d %lld %*d %lld", &rc, &wc, &it) == 3)
+        unsigned long long it, wc, rc;
+        if (sscanf(buffer, "%*d %*d %*s %llu %*d %*d %*d %llu %*d %llu", &rc, &wc, &it) == 3)
         {
             reads_completed += rc;
             writes_completed += wc;
