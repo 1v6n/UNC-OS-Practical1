@@ -1,0 +1,92 @@
+groups:
+  - name: system_sentinel_availability
+    rules:
+      - alert: DuckDNSHttpDown
+        expr: probe_success{job="blackbox_duckdns_http"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DuckDNS HTTP check failed"
+          description: "HTTPS probe to myadguardzi.duckdns.org has been failing for 5 minutes."
+
+      - alert: DuckDNSDnsDown
+        expr: probe_success{job="blackbox_duckdns_dns"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DuckDNS DNS resolution failed"
+          description: "DNS probe for myadguardzi.duckdns.org has been failing for 5 minutes."
+
+      - alert: NetbirdSshDown
+        expr: probe_success{job="blackbox_ssh_netbird"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SSH down on Netbird IP"
+          description: "TCP probe to 100.124.161.192:22 has been failing for 5 minutes."
+
+      - alert: TargetDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scrape target down"
+          description: "Prometheus cannot scrape {{ $labels.job }} ({{ $labels.instance }}) for 5 minutes."
+
+      - alert: HighDiskUsageCritical
+        expr: disk_usage_percentage > 90
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk usage is critically high"
+          description: "disk_usage_percentage is above 90% for 10 minutes."
+
+      - alert: HighDiskUsageWarning
+        expr: disk_usage_percentage > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk usage is high"
+          description: "disk_usage_percentage is above 80% for 10 minutes."
+
+      - alert: HighMemoryUsage
+        expr: memory_usage_percentage > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Memory usage is high"
+          description: "memory_usage_percentage is above 90% for 5 minutes."
+
+      - alert: HighCpuUsage
+        expr: cpu_usage_percentage > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU usage is high"
+          description: "cpu_usage_percentage is above 90% for 10 minutes."
+
+      - alert: NetworkErrorPackets
+        expr: (max_over_time(rx_errors_total[5m]) - min_over_time(rx_errors_total[5m]) > 0) or (max_over_time(tx_errors_total[5m]) - min_over_time(tx_errors_total[5m]) > 0)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Network interface reports errors"
+          description: "rx_errors_total or tx_errors_total increased during the last 5 minutes."
+
+      - alert: NetworkDroppedPackets
+        expr: max_over_time(dropped_packets_total[5m]) - min_over_time(dropped_packets_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dropped packets detected"
+          description: "dropped_packets_total increased during the last 5 minutes."
