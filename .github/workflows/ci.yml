@@ -14,6 +14,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Validate submodules are present
+        run: |
+          test -d lib/prometheus-client-c/prom
+          test -d lib/prometheus-client-c/promhttp
 
       - name: Validate no hardcoded secrets
         run: |
