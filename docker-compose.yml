@@ -23,7 +23,7 @@ services:
     environment:
       NETWORK_INTERFACE: ${NETWORK_INTERFACE:-}
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${MONITOR_BIND_ADDR:-127.0.0.1}:8000:8000"
 
   prometheus:
     image: prom/prometheus:v3.9.1
@@ -33,7 +33,7 @@ services:
     environment:
       SSH_TARGETS: ${SSH_TARGETS}
     ports:
-      - "127.0.0.1:9090:9090"
+      - "${MONITOR_BIND_ADDR:-127.0.0.1}:9090:9090"
     volumes:
       - prometheus_data:/prometheus
       - ./prometheus/prometheus.yml.tmpl:/etc/prometheus/prometheus.yml.tmpl:ro
@@ -53,7 +53,7 @@ services:
     restart: unless-stopped
     logging: *logging-default
     ports:
-      - "127.0.0.1:3000:3000"
+      - "${MONITOR_BIND_ADDR:-127.0.0.1}:3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -71,7 +71,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
     ports:
-      - "127.0.0.1:9093:9093"
+      - "${MONITOR_BIND_ADDR:-127.0.0.1}:9093:9093"
     volumes:
       - ./alertmanager/alertmanager.yml.tmpl:/etc/alertmanager/alertmanager.yml.tmpl:ro
       - ./alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
@@ -85,7 +85,7 @@ services:
     restart: unless-stopped
     logging: *logging-default
     ports:
-      - "127.0.0.1:9115:9115"
+      - "${MONITOR_BIND_ADDR:-127.0.0.1}:9115:9115"
     volumes:
       - ./blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
     command:
