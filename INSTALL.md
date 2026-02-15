@@ -72,6 +72,10 @@ Optional:
   - Empty: app auto-detects the first non-loopback interface
   - Set value (for example `eth0`): force a specific interface
 
+NetBird-only mode:
+- Set `MONITOR_BIND_ADDR` in `.env` to the instance NetBird IP (example: `100.124.161.192`).
+- Do not open public ingress for Grafana/Prometheus/Alertmanager/Blackbox ports in Oracle networking.
+
 ## 4. Deployment (Recommended)
 
 Use the project bootstrap script:

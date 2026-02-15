@@ -97,6 +97,12 @@ SSH probe behavior:
 - `SSH_TARGET` is still accepted as backward-compatible fallback
 - The Grafana SSH availability panel displays this target from the `instance` label
 
+NetBird-only exposure (no public internet ports):
+
+- Set `MONITOR_BIND_ADDR` in `.env` to your NetBird IP (for example `100.124.161.192`).
+- Keep Oracle Security List/NSG closed for 3000/9090/9093/9115/8000 (no public ingress).
+- Optionally allow those ports only from `100.64.0.0/10` in host firewall.
+
 ## Access Points
 
 - App metrics: `http://localhost:8000/metrics`
