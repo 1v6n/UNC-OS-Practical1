@@ -6,32 +6,105 @@ set -euo pipefail
 # - Prepares .env (optionally from exported env vars)
 # - Binds services to NetBird IP when available
 # - Starts full stack and initializes exporter FIFO
+# - Runs post-install health validation
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+DRY_RUN=0
+LOG_FILE="${INSTALL_LOG_FILE:-/tmp/systemsentinel-install.log}"
+SUDO=""
+
+usage() {
+  cat <<USAGE
+Usage: bash scripts/install-oracle-arm.sh [options]
+
+Options:
+  --dry-run           Print planned actions without executing changes.
+  --log-file <path>   Write installer logs to custom file.
+  -h, --help          Show this help.
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      ;;
+    --log-file)
+      shift
+      [ "$#" -gt 0 ] || {
+        echo "ERROR: --log-file requires a path"
+        exit 1
+      }
+      LOG_FILE="$1"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: unknown option: $1"
+      usage
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+mkdir -p "$(dirname "${LOG_FILE}")"
+: > "${LOG_FILE}"
+
+timestamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+log_info() { printf '%s [INFO] %s\n' "$(timestamp)" "$*" | tee -a "${LOG_FILE}"; }
+log_warn() { printf '%s [WARN] %s\n' "$(timestamp)" "$*" | tee -a "${LOG_FILE}"; }
+log_error() { printf '%s [ERROR] %s\n' "$(timestamp)" "$*" | tee -a "${LOG_FILE}" >&2; }
+
+run_cmd() {
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log_info "[dry-run] $*"
+    return 0
+  fi
+  log_info "run: $*"
+  "$@"
+}
+
+run_sh() {
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log_info "[dry-run] $*"
+    return 0
+  fi
+  log_info "run(sh): $*"
+  bash -lc "$*"
+}
+
+on_error() {
+  local line="$1"
+  log_error "Installer failed at line ${line}."
+  log_info "Rollback hints:"
+  log_info "  docker compose logs --tail=200"
+  log_info "  docker compose down"
+  log_info "Log file: ${LOG_FILE}"
+}
+trap 'on_error $LINENO' ERR
+
 if [ ! -f "docker-compose.yml" ]; then
-  echo "ERROR: run this script from the SystemSentinel repository."
+  log_error "run this script from the SystemSentinel repository."
   exit 1
 fi
 
 if ! command -v apt-get >/dev/null 2>&1; then
-  echo "ERROR: this installer currently supports Ubuntu/Debian (apt-based systems)."
+  log_error "this installer currently supports Ubuntu/Debian (apt-based systems)."
   exit 1
 fi
 
-SUDO=""
 if [ "${EUID}" -ne 0 ]; then
   SUDO="sudo"
 fi
 
-log() {
-  printf '\n==> %s\n' "$*"
-}
-
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "ERROR: required command not found: $1"
+    log_error "required command not found: $1"
     exit 1
   fi
 }
@@ -54,26 +127,45 @@ get_env_var() {
   grep -E "^${key}=" "${file}" | tail -n1 | cut -d= -f2-
 }
 
-install_docker() {
-  log "Installing Docker Engine + Buildx + Compose plugin"
-  ${SUDO} apt-get update
-  ${SUDO} apt-get install -y ca-certificates curl gnupg lsb-release
+wait_for_url() {
+  local url="$1"
+  local tries="${2:-30}"
+  local sleep_secs="${3:-2}"
+  local i=1
 
-  ${SUDO} install -m 0755 -d /etc/apt/keyrings
+  while [ "${i}" -le "${tries}" ]; do
+    if curl -fsS "${url}" >/dev/null 2>&1; then
+      log_info "health OK: ${url}"
+      return 0
+    fi
+    log_info "waiting for ${url} (${i}/${tries})"
+    sleep "${sleep_secs}"
+    i=$((i + 1))
+  done
+
+  log_error "timeout waiting for ${url}"
+  return 1
+}
+
+install_docker() {
+  log_info "Installing Docker Engine + Buildx + Compose plugin"
+  run_cmd ${SUDO} apt-get update
+  run_cmd ${SUDO} apt-get install -y ca-certificates curl gnupg lsb-release
+
+  run_cmd ${SUDO} install -m 0755 -d /etc/apt/keyrings
   if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | ${SUDO} gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    ${SUDO} chmod a+r /etc/apt/keyrings/docker.gpg
+    run_sh "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | ${SUDO} gpg --dearmor -o /etc/apt/keyrings/docker.gpg"
+    run_cmd ${SUDO} chmod a+r /etc/apt/keyrings/docker.gpg
   fi
 
   . /etc/os-release
   ARCH="$(dpkg --print-architecture)"
   CODENAME="${VERSION_CODENAME:-$(lsb_release -cs)}"
-  echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable" \
-    | ${SUDO} tee /etc/apt/sources.list.d/docker.list >/dev/null
+  run_sh "echo 'deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable' | ${SUDO} tee /etc/apt/sources.list.d/docker.list >/dev/null"
 
-  ${SUDO} apt-get update
-  ${SUDO} apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  ${SUDO} systemctl enable --now docker
+  run_cmd ${SUDO} apt-get update
+  run_cmd ${SUDO} apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  run_cmd ${SUDO} systemctl enable --now docker
 }
 
 pick_docker_cmd() {
@@ -93,13 +185,11 @@ prepare_env() {
     cp .env.example .env
   fi
 
-  # Allow caller to inject values when running script.
   [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && set_env_var "TELEGRAM_BOT_TOKEN" "${TELEGRAM_BOT_TOKEN}" .env
   [ -n "${TELEGRAM_CHAT_ID:-}" ] && set_env_var "TELEGRAM_CHAT_ID" "${TELEGRAM_CHAT_ID}" .env
   [ -n "${SSH_TARGETS:-}" ] && set_env_var "SSH_TARGETS" "${SSH_TARGETS}" .env
   [ -n "${NETWORK_INTERFACE:-}" ] && set_env_var "NETWORK_INTERFACE" "${NETWORK_INTERFACE}" .env
 
-  # Auto-bind to NetBird interface if available and no explicit override was provided.
   if [ -z "${MONITOR_BIND_ADDR:-}" ]; then
     if ip -4 addr show wt0 >/dev/null 2>&1; then
       NB_IP="$(ip -4 -o addr show wt0 | awk '{print $4}' | cut -d/ -f1 | head -n1)"
@@ -111,43 +201,67 @@ prepare_env() {
     set_env_var "MONITOR_BIND_ADDR" "${MONITOR_BIND_ADDR}" .env
   fi
 
-  # Validate required runtime vars.
-  local bot chat ssh
+  local bot chat ssh bind_addr
   bot="$(get_env_var TELEGRAM_BOT_TOKEN .env || true)"
   chat="$(get_env_var TELEGRAM_CHAT_ID .env || true)"
   ssh="$(get_env_var SSH_TARGETS .env || true)"
+  bind_addr="$(get_env_var MONITOR_BIND_ADDR .env || true)"
 
   if [ -z "${bot}" ] || [[ "${bot}" == replace_with_* ]]; then
-    echo "ERROR: TELEGRAM_BOT_TOKEN is not configured in .env"
+    log_error "TELEGRAM_BOT_TOKEN is not configured in .env"
     exit 1
   fi
   if [ -z "${chat}" ] || [[ "${chat}" == replace_with_* ]]; then
-    echo "ERROR: TELEGRAM_CHAT_ID is not configured in .env"
+    log_error "TELEGRAM_CHAT_ID is not configured in .env"
     exit 1
   fi
   if [ -z "${ssh}" ]; then
-    echo "ERROR: SSH_TARGETS is not configured in .env"
+    log_error "SSH_TARGETS is not configured in .env"
     exit 1
+  fi
+  if [ "${bind_addr}" = "0.0.0.0" ]; then
+    log_warn "MONITOR_BIND_ADDR=0.0.0.0 exposes monitoring ports on all interfaces. Prefer NetBird IP or 127.0.0.1."
   fi
 }
 
-log "Checking prerequisites"
+post_install_validate() {
+  local bind_addr
+  bind_addr="$(get_env_var MONITOR_BIND_ADDR .env || true)"
+  [ -z "${bind_addr}" ] && bind_addr="127.0.0.1"
+
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log_info "Skipping post-install validation in dry-run mode."
+    return 0
+  fi
+
+  log_info "Running post-install validation"
+  wait_for_url "http://${bind_addr}:8000/metrics"
+  wait_for_url "http://${bind_addr}:9090/-/ready"
+  wait_for_url "http://${bind_addr}:9093/-/healthy"
+  wait_for_url "http://${bind_addr}:9115/-/healthy"
+
+  curl -fsS "http://${bind_addr}:8000/metrics" | grep -q "cpu_usage_percentage"
+  curl -fsS "http://${bind_addr}:9090/api/v1/targets" >/dev/null
+  log_info "Validation completed successfully"
+}
+
+log_info "Checking prerequisites"
 require_cmd curl
 require_cmd awk
 require_cmd sed
 require_cmd ip
 
-log "Checking Prometheus client submodule"
+log_info "Checking Prometheus client submodule"
 if [ ! -d "lib/prometheus-client-c/prom" ] || [ ! -d "lib/prometheus-client-c/promhttp" ]; then
   if [ -d ".git" ] && command -v git >/dev/null 2>&1; then
-    git submodule sync --recursive
-    git submodule update --init --recursive
+    run_cmd git submodule sync --recursive
+    run_cmd git submodule update --init --recursive
   fi
 fi
 
 if [ ! -d "lib/prometheus-client-c/prom" ] || [ ! -d "lib/prometheus-client-c/promhttp" ]; then
-  echo "ERROR: lib/prometheus-client-c submodule is missing."
-  echo "Run: git submodule update --init --recursive"
+  log_error "lib/prometheus-client-c submodule is missing."
+  log_error "Run: git submodule update --init --recursive"
   exit 1
 fi
 
@@ -155,45 +269,53 @@ install_docker
 
 TARGET_USER="${SUDO_USER:-${USER}}"
 if ! id -nG "${TARGET_USER}" | grep -qw docker; then
-  log "Adding ${TARGET_USER} to docker group"
-  ${SUDO} usermod -aG docker "${TARGET_USER}" || true
+  log_info "Adding ${TARGET_USER} to docker group"
+  run_cmd ${SUDO} usermod -aG docker "${TARGET_USER}"
 fi
 
 prepare_env
 
 DOCKER_CMD="$(pick_docker_cmd)"
-if [ "${DOCKER_CMD}" = "ERROR" ]; then
-  echo "ERROR: Docker daemon is not reachable. Check: systemctl status docker"
+if [ "${DOCKER_CMD}" = "ERROR" ] && [ "${DRY_RUN}" -eq 0 ]; then
+  log_error "Docker daemon is not reachable. Check: systemctl status docker"
   exit 1
 fi
+if [ "${DOCKER_CMD}" = "ERROR" ] && [ "${DRY_RUN}" -eq 1 ]; then
+  DOCKER_CMD="docker"
+fi
 
-log "Using Docker command: ${DOCKER_CMD}"
-
-log "Starting SystemSentinel stack"
+log_info "Using Docker command: ${DOCKER_CMD}"
+log_info "Starting SystemSentinel stack"
 # shellcheck disable=SC2086
-${DOCKER_CMD} compose up -d --build
+run_sh "${DOCKER_CMD} compose up -d --build"
 
-log "Initializing exporter FIFO metrics"
+log_info "Initializing exporter FIFO metrics"
 METRICS="${SYSTEM_SENTINEL_METRICS:-cpu_usage_percentage,memory_usage_percentage,disk_usage_percentage,available_memory_mb,io_time_ms,rx_bytes_total,tx_bytes_total,rx_errors_total,tx_errors_total,dropped_packets_total}"
-TRIES=30
-until ${DOCKER_CMD} compose exec -T app sh -lc 'test -p /tmp/monitor_fifo' >/dev/null 2>&1; do
-  TRIES=$((TRIES - 1))
-  if [ "${TRIES}" -le 0 ]; then
-    echo "ERROR: timed out waiting for /tmp/monitor_fifo"
-    exit 1
-  fi
-  sleep 2
-done
-${DOCKER_CMD} compose exec -T app sh -lc "printf '%s' \"${METRICS}\" > /tmp/monitor_fifo"
+if [ "${DRY_RUN}" -eq 0 ]; then
+  TRIES=30
+  until ${DOCKER_CMD} compose exec -T app sh -lc 'test -p /tmp/monitor_fifo' >/dev/null 2>&1; do
+    TRIES=$((TRIES - 1))
+    if [ "${TRIES}" -le 0 ]; then
+      log_error "timed out waiting for /tmp/monitor_fifo"
+      exit 1
+    fi
+    sleep 2
+  done
+  ${DOCKER_CMD} compose exec -T app sh -lc "printf '%s' \"${METRICS}\" > /tmp/monitor_fifo"
+else
+  log_info "[dry-run] would initialize FIFO with metrics: ${METRICS}"
+fi
+
+post_install_validate
 
 BIND_ADDR="$(get_env_var MONITOR_BIND_ADDR .env || true)"
 [ -z "${BIND_ADDR}" ] && BIND_ADDR="127.0.0.1"
 
-log "Deployment complete"
-echo "Prometheus:   http://${BIND_ADDR}:9090"
-echo "Grafana:      http://${BIND_ADDR}:3000"
-echo "Alertmanager: http://${BIND_ADDR}:9093"
-echo "App metrics:  http://${BIND_ADDR}:8000/metrics"
-echo ""
-echo "If docker access fails without sudo in a new shell, run:"
-echo "  newgrp docker"
+log_info "Deployment complete"
+printf 'Prometheus:   http://%s:9090\n' "${BIND_ADDR}" | tee -a "${LOG_FILE}"
+printf 'Grafana:      http://%s:3000\n' "${BIND_ADDR}" | tee -a "${LOG_FILE}"
+printf 'Alertmanager: http://%s:9093\n' "${BIND_ADDR}" | tee -a "${LOG_FILE}"
+printf 'App metrics:  http://%s:8000/metrics\n' "${BIND_ADDR}" | tee -a "${LOG_FILE}"
+
+log_info "If docker access fails without sudo in a new shell, run: newgrp docker"
+log_info "Installer log saved to: ${LOG_FILE}"

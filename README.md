@@ -40,6 +40,13 @@ Oracle ARM one-shot install (Ubuntu/Debian VM):
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... SSH_TARGETS="Oracle ARM SSH=100.124.161.192:22" bash scripts/install-oracle-arm.sh
 ```
 
+Installer options:
+
+```bash
+bash scripts/install-oracle-arm.sh --dry-run
+bash scripts/install-oracle-arm.sh --log-file /var/log/systemsentinel-install.log
+```
+
 One-command startup (recommended):
 
 ```bash

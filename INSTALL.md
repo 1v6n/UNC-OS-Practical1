@@ -84,11 +84,19 @@ For Ubuntu/Debian Oracle ARM instances:
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... SSH_TARGETS="Oracle ARM SSH=100.124.161.192:22" bash scripts/install-oracle-arm.sh
 ```
 
+Optional installer flags:
+
+```bash
+bash scripts/install-oracle-arm.sh --dry-run
+bash scripts/install-oracle-arm.sh --log-file /var/log/systemsentinel-install.log
+```
+
 What it does:
 1. Installs Docker Engine + Compose plugin (official Docker repo)
 2. Creates/updates `.env`
 3. Auto-binds service ports to NetBird `wt0` IP when present (or `MONITOR_BIND_ADDR` override)
 4. Starts stack and initializes exporter FIFO metrics
+5. Runs post-install endpoint validation (Prometheus/Grafana/Alertmanager/Blackbox)
 
 ## 5. Deployment (Recommended)
 
