@@ -18,9 +18,12 @@ receivers:
         message: |-
           *{{ .Status | toUpper }}* - {{ .CommonLabels.alertname }}
           *Severity:* {{ .CommonLabels.severity }}
-          *Job:* {{ .CommonLabels.job }}
-          *Instance:* {{ .CommonLabels.instance }}
+          *Active alerts:* {{ len .Alerts }}
           {{ range .Alerts }}
+          ---
+          *Target:* `{{ or .Labels.instance "n/a" }}`
+          *Job:* `{{ or .Labels.job "n/a" }}`
           *Summary:* {{ .Annotations.summary }}
           *Description:* {{ .Annotations.description }}
+          *Started:* `{{ .StartsAt }}`
           {{ end }}
