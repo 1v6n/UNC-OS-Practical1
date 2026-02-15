@@ -34,6 +34,12 @@ Use `Friendly Name=IP:PORT` to show aliases in Grafana/alerts. Example:
 
 Prerequisite: Docker Buildx plugin installed (`docker buildx version` must work).
 
+Oracle ARM one-shot install (Ubuntu/Debian VM):
+
+```bash
+TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... SSH_TARGETS="Oracle ARM SSH=100.124.161.192:22" bash scripts/install-oracle-arm.sh
+```
+
 One-command startup (recommended):
 
 ```bash

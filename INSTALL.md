@@ -76,7 +76,21 @@ NetBird-only mode:
 - Set `MONITOR_BIND_ADDR` in `.env` to the instance NetBird IP (example: `100.124.161.192`).
 - Do not open public ingress for Grafana/Prometheus/Alertmanager/Blackbox ports in Oracle networking.
 
-## 4. Deployment (Recommended)
+## 4. Oracle ARM One-Shot Installation
+
+For Ubuntu/Debian Oracle ARM instances:
+
+```bash
+TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... SSH_TARGETS="Oracle ARM SSH=100.124.161.192:22" bash scripts/install-oracle-arm.sh
+```
+
+What it does:
+1. Installs Docker Engine + Compose plugin (official Docker repo)
+2. Creates/updates `.env`
+3. Auto-binds service ports to NetBird `wt0` IP when present (or `MONITOR_BIND_ADDR` override)
+4. Starts stack and initializes exporter FIFO metrics
+
+## 5. Deployment (Recommended)
 
 Use the project bootstrap script:
 
@@ -89,7 +103,7 @@ What it does:
 2. Waits for FIFO availability in the app container
 3. Initializes the exporter metric set automatically
 
-## 5. Deployment (Manual)
+## 6. Deployment (Manual)
 
 If you need full control:
 
@@ -100,7 +114,7 @@ docker compose exec -T app sh -lc "printf '%s' 'cpu_usage_percentage,memory_usag
 
 Prometheus and alert rules are rendered at runtime from templates using `.env` values, including `SSH_TARGETS`.
 
-## 6. First Health Validation
+## 7. First Health Validation
 
 Container status:
 
@@ -126,7 +140,7 @@ Grafana quick validation:
 - Top row should show `Endpoint Uptime % (24h)`, `SSH Uptime % (24h)`, and `Error Budget Remaining (30d, 99.9% SLO)`.
 - SSH panels should display your alias names from `SSH_TARGETS` (not raw `IP:PORT`).
 
-## 7. Platform-Specific Notes
+## 8. Platform-Specific Notes
 
 ### Arch / CachyOS
 
@@ -142,7 +156,7 @@ If Docker daemon is not running:
 sudo systemctl enable --now docker.service
 ```
 
-## 8. Recovery Scenarios
+## 9. Recovery Scenarios
 
 ### Rebuild app image from scratch
 
@@ -165,7 +179,7 @@ git submodule sync --recursive
 git submodule update --init --recursive
 ```
 
-## 9. Local Build Without Docker (Optional)
+## 10. Local Build Without Docker (Optional)
 
 This path is only for native C development/debugging.
 
@@ -195,7 +209,7 @@ cmake --build build
 ./build/SystemSentinel
 ```
 
-## 10. Post-Install Maintenance
+## 11. Post-Install Maintenance
 
 For Docker disk usage cleanup:
 
