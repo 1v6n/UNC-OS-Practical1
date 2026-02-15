@@ -60,6 +60,12 @@ cp .env.example .env
 Set required variables in `.env`:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+- `SSH_TARGETS` (comma-separated, supports `IP:PORT` or `Friendly Name=IP:PORT`, example: `Netbird Main=100.124.161.192:22,Backup SSH=10.0.0.15:22`)
+
+Alias recommendation:
+- Use stable aliases that reflect purpose/location, not temporary network details.
+- Good: `Oracle ARM SSH=100.124.161.192:22`
+- Avoid: `new-test-host=100.124.161.192:22`
 
 Optional:
 - `NETWORK_INTERFACE`
@@ -88,6 +94,8 @@ docker compose up -d --build
 docker compose exec -T app sh -lc "printf '%s' 'cpu_usage_percentage,memory_usage_percentage,disk_usage_percentage,available_memory_mb,io_time_ms,rx_errors_total,tx_errors_total,dropped_packets_total' > /tmp/monitor_fifo"
 ```
 
+Prometheus and alert rules are rendered at runtime from templates using `.env` values, including `SSH_TARGETS`.
+
 ## 6. First Health Validation
 
 Container status:
@@ -109,6 +117,10 @@ UI endpoints:
 - Prometheus: `http://localhost:9090`
 - Alertmanager: `http://localhost:9093`
 - Grafana: `http://localhost:3000`
+
+Grafana quick validation:
+- Top row should show `Endpoint Uptime % (24h)`, `SSH Uptime % (24h)`, and `Error Budget Remaining (30d, 99.9% SLO)`.
+- SSH panels should display your alias names from `SSH_TARGETS` (not raw `IP:PORT`).
 
 ## 7. Platform-Specific Notes
 
